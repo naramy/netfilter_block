@@ -10,6 +10,9 @@
 #include <netinet/ip.h>		//struct ip, IPPROTO
 #include <netinet/tcp.h>	//struct tcphdr
 #include <cstring>
+#include <regex>
+
+using namespace std;
 
 bool block_chk = false;
 char *block_site = nullptr;
@@ -48,8 +51,9 @@ class Httphdr {
 	private:
 		const u_char *packet;
 		uint8_t len;
-		const char *http_method[8] = {"GET", "POST", "HEAD", "PUT", "DELETE",
-				"OPTIONS", "TRACE", "CONNECT"};
+		const char * const http_method[8] = {
+			"CONNECT", "TRACE", "OPTIONS", "DELETE",
+			"PUT", "HEAD", "POST", "GET"};
 	public:
 		Httphdr() { this->packet = nullptr; }
 		Httphdr(const Iphdr *ip, const Tcphdr *tcp,  u_char **packet) {
@@ -58,13 +62,13 @@ class Httphdr {
 		}
 		~Httphdr() { this->packet = nullptr; }
 		bool Ishttp(uint8_t src, uint8_t dst) {
-			if((src == 80 || dst == 80) && this->len) return true;
+			if((dst == 80) && this->len) return true;
 			else return false;
 		}
 		void find() {
 			bool http = false;
 			int i = sizeof(http_method)/sizeof(http_method[0]);
-			while(i-- > 0) {
+			while(i--) {
 				if(strncmp(http_method[i], (const char *)packet,
 				strlen(http_method[i])) == 0) {
 					http = true;
@@ -73,17 +77,14 @@ class Httphdr {
 			}
 			if(http) {
 				if(block_site != nullptr) {
-					/*
-					char *search = strstr((char *)packet, block_site);
-					
-					if(search != nullptr)
-						block_chk = true;
-					*/
-					char *search = strstr((char *)packet, "Host:");
-					if(search != nullptr) {
-						char *result = strtok(search, " ");
-						result = strtok(NULL, " ");
-						result = strtok(result, "\n");
+					regex pattern("(Host:) ([^\r\n]+)");
+					string str((char *)packet, len);
+					smatch m;
+
+					if(regex_search(str, m, pattern)) {
+						for(size_t i = 0; i < m.size(); i++)
+							printf("m[%d] : %s\n", i, m.str(i).c_str());
+						char *result = (char *)m.str(2).c_str();
 						if(strncmp(block_site, result, sizeof(result)) == 0)
 							block_chk = true;
 					}
@@ -169,7 +170,10 @@ static uint32_t print_pkt (struct nfq_data *tb)
 			Httphdr *http = new Httphdr(ip, tcp, &data);
 			if(http->Ishttp(tcp->getThsport(), tcp->getThdport()))
 				http->find();
+			delete http;
+			delete tcp;
 		}
+		delete ip;
 	}
 	fputc('\n', stdout);
 
